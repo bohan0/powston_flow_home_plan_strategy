@@ -89,8 +89,8 @@ if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
 if action == 'export':
     action = decisions.reason('auto', "Don't export outside of specific time periods as Flow sell=0c", priority=3)
     
-if action == 'discharge':
-    action = decisions.reason('auto', "Only allow auto, charge, import and export modes", priority=3)
+if action == 'discharge' or action == 'charge':
+    action = decisions.reason('auto', "Only allow auto, import and export modes", priority=3)
     
 # Don't import in the morning before the funny Flow AEST solar soak period of 11am to 3pm (during Sydney daylight savings months)
 if action != 'import' and i_hour >= PEAK_SUN_START_HOUR:
