@@ -1,8 +1,4 @@
 # PowstonAutoTuned: Decision Script
-# CICD: '2025-10-28T17:45:00+10:00', 'export'
-# CICD: '2025-10-29T18:30:00+10:00', 'export'
-# CICD: '2025-11-04T22:10:00+10:00', '!export'
-# CICD: '2025-11-03T16:30:00+10:00', 'export'
 min_soc = 18  # % Minimum battery SOC
 action = decisions.reason('auto', 'Starting in auto mode - default', buy_price=buy_price, sell_price=sell_price)
 c_rating = 4  # number of half hours to charge/discharge
@@ -64,7 +60,8 @@ i_minute = interval_time.minute
 # 1pm = 58%
 # 2pm = 74%
 # 3pm = 90%
-PEAK_SUN_START_HOUR = 11  # Flow "AEST" N71 solar soak start hour (accounting for their DST mistake)
+FLOW_SOLAR_SOAK_START_HOUR = 11  # Flow "AEST" N71 solar soak start hour (accounting for their DST mistake)
+FLOW_SOLAR_SOAK_END_HOUR = 15  # Flow "AEST" N71 solar soak end hour (accounting for their DST mistake)
 
 # 15c/kWh = 45c Flow happy hour sell rate - 20c Flow AVG post PEA buy rate - 10c target min profit margin
 MAX_BUY_PRICE = 15
@@ -75,6 +72,9 @@ TARGET_SOC_GAIN_PER_MINUTE = TARGET_SOC_GAIN_PER_HOUR/60
 CHEAP_BUY_PRICE = 7  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tariff
 CHEAP_BUY_TARGET_SOC_OFFSET = 5  # increase the target soc if buy price is low to avoid importing at higher prices later
 FLOW_PROFIT_MARGIN = 15  # a guestimate of how much Flow makes c/kWh based on historical bills
+SOLAR_SOAK_DNSP_FEE = 4  # 2025-2026 FY Endeavour N71 solar soak tariff for 10am to 2pm
+OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm
+OFF_PEAK_END_HOUR = 16
 
 # If it's a 'post Flow PEA' negative price, let magic mode import, otherwise don't import if we have enough for house loads
 if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
@@ -83,9 +83,9 @@ if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
     elif buy_price > CHEAP_BUY_PRICE:
         action = decisions.reason('auto', f"No magic import when price > {CHEAP_BUY_PRICE}c", priority=3)
     elif buy_price > MAX_BUY_PRICE or battery_soc > BATTERY_SOC_AC:
-        action = decisions.reason('auto', f"No magic import when price > {MAX_BUY_PRICE}c or enough soc to last until {PEAK_SUN_START_HOUR}am", 
+        action = decisions.reason('auto', f"No magic import when price > {MAX_BUY_PRICE}c or enough soc to last until {FLOW_SOLAR_SOAK_START_HOUR}am", 
                                   priority=3, required_soc=BATTERY_SOC_AC)
-
+        
 if action == 'export':
     action = decisions.reason('auto', "Don't export outside of specific time periods as Flow sell=0c", priority=3)
     
@@ -93,19 +93,18 @@ if action == 'discharge' or action == 'charge':
     action = decisions.reason('auto', "Only allow auto, import and export modes", priority=3)
     
 # Don't import in the morning before the funny Flow AEST solar soak period of 11am to 3pm (during Sydney daylight savings months)
-if action != 'import' and i_hour >= PEAK_SUN_START_HOUR:
-    gain_from_hours = (i_hour - PEAK_SUN_START_HOUR) * TARGET_SOC_GAIN_PER_HOUR
+if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < OFF_PEAK_END_HOUR:
+    gain_from_hours = (i_hour - FLOW_SOLAR_SOAK_START_HOUR) * TARGET_SOC_GAIN_PER_HOUR
     gain_from_minutes_of_current_hour = i_minute * TARGET_SOC_GAIN_PER_MINUTE
     target_soc = round(TARGET_START_HOUR_SOC + gain_from_hours + gain_from_minutes_of_current_hour, 2)
-    if battery_soc < target_soc and buy_price <= MAX_BUY_PRICE:
-        action = decisions.reason('import', f"Flow N71 AEST solar soak starts {PEAK_SUN_START_HOUR}am, {target_soc=}", priority=4)
-    elif battery_soc < target_soc + CHEAP_BUY_TARGET_SOC_OFFSET and buy_price <= CHEAP_BUY_PRICE:
-        reason_description = (
-            f"Flow N71 AEST solar soak starts {PEAK_SUN_START_HOUR}am with {CHEAP_BUY_TARGET_SOC_OFFSET}% higher target SoC due to low buy_price, "
-            f"{target_soc=}"
-        )
+    real_buy_price = rrp/1000 + SOLAR_SOAK_DNSP_FEE if i_hour < FLOW_SOLAR_SOAK_END_HOUR else OFF_PEAK_DNSP_FEE
+    FLOW_SOAK_START_TEXT = f"Flow N71 AEST solar soak starts {FLOW_SOLAR_SOAK_START_HOUR}am"
+    if battery_soc < target_soc and real_buy_price <= MAX_BUY_PRICE:
+        action = decisions.reason('import', f"{FLOW_SOAK_START_TEXT}, {target_soc=}, {real_buy_price=}", priority=4)
+    elif battery_soc < target_soc + CHEAP_BUY_TARGET_SOC_OFFSET and real_buy_price <= CHEAP_BUY_PRICE and i_hour < FLOW_SOLAR_SOAK_END_HOUR:
+        reason_description = f"{FLOW_SOAK_START_TEXT} with {CHEAP_BUY_TARGET_SOC_OFFSET}% higher target SoC due to low buy price, {target_soc=}"
         action = decisions.reason('import', reason_description, priority=4, target_soc=target_soc, 
-                                  low_price_target_soc_offset=CHEAP_BUY_TARGET_SOC_OFFSET)
+                                  low_price_target_soc_offset=CHEAP_BUY_TARGET_SOC_OFFSET, real_buy_price=real_buy_price)
 
 if battery_soc > min_soc and action != 'export':
     if (i_hour == 17 and i_minute > 30) or i_hour == 18 or (i_hour == 19 and i_minute <= 30):
