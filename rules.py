@@ -73,8 +73,8 @@ CHEAP_BUY_PRICE = 7  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tar
 CHEAP_BUY_TARGET_SOC_OFFSET = 5  # increase the target soc if buy price is low to avoid importing at higher prices later
 FLOW_PROFIT_MARGIN = 15  # a guestimate of how much Flow makes c/kWh based on historical bills
 SOLAR_SOAK_DNSP_FEE = 4  # 2025-2026 FY Endeavour N71 solar soak tariff for 10am to 2pm
-OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm
-OFF_PEAK_END_HOUR = 16
+OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm LOCAL time
+FLOW_OFF_PEAK_END_HOUR = 17  # Funny Flow N71 AEST off peak end hour
 
 # If it's a 'post Flow PEA' negative price, let magic mode import, otherwise don't import if we have enough for house loads
 if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
@@ -85,7 +85,7 @@ if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
     elif buy_price > MAX_BUY_PRICE or battery_soc > BATTERY_SOC_AC:
         action = decisions.reason('auto', f"No magic import when price > {MAX_BUY_PRICE}c or enough soc to last until {FLOW_SOLAR_SOAK_START_HOUR}am", 
                                   priority=3, required_soc=BATTERY_SOC_AC)
-        
+
 if action == 'export':
     action = decisions.reason('auto', "Don't export outside of specific time periods as Flow sell=0c", priority=3)
     
@@ -93,7 +93,7 @@ if action == 'discharge' or action == 'charge':
     action = decisions.reason('auto', "Only allow auto, import and export modes", priority=3)
     
 # Don't import in the morning before the funny Flow AEST solar soak period of 11am to 3pm (during Sydney daylight savings months)
-if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < OFF_PEAK_END_HOUR:
+if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < FLOW_OFF_PEAK_END_HOUR:
     gain_from_hours = (i_hour - FLOW_SOLAR_SOAK_START_HOUR) * TARGET_SOC_GAIN_PER_HOUR
     gain_from_minutes_of_current_hour = i_minute * TARGET_SOC_GAIN_PER_MINUTE
     target_soc = round(TARGET_START_HOUR_SOC + gain_from_hours + gain_from_minutes_of_current_hour, 2)
