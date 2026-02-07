@@ -69,15 +69,16 @@ MAX_BUY_PRICE = 15
 TARGET_START_HOUR_SOC = 16
 TARGET_SOC_GAIN_PER_HOUR = 16
 TARGET_SOC_GAIN_PER_MINUTE = TARGET_SOC_GAIN_PER_HOUR/60
-CHEAP_BUY_PRICE = 7  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tariff
+CHEAP_BUY_PRICE = 5  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tariff
 CHEAP_BUY_TARGET_SOC_OFFSET = 5  # increase the target soc if buy price is low to avoid importing at higher prices later
 FLOW_PROFIT_MARGIN = 15  # a guestimate of how much Flow makes c/kWh based on historical bills
 SOLAR_SOAK_DNSP_FEE = 4  # 2025-2026 FY Endeavour N71 solar soak tariff for 10am to 2pm
 OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm LOCAL time
-FLOW_OFF_PEAK_END_HOUR = 17  # Funny Flow N71 AEST off peak end hour
+FLOW_OFF_PEAK_END_HOUR = 16  # Funny Flow N71 AEST off peak end hour is actually 5pm but just use 4pm to be safe
+IMPORT_SOC_LIMIT = 95
 
 # If it's a 'post Flow PEA' negative price, let magic mode import, otherwise don't import if we have enough for house loads
-if action == 'import' and buy_price > -FLOW_PROFIT_MARGIN:
+if action == 'import' and buy_price >= -FLOW_PROFIT_MARGIN:
     if battery_soc > 50:  
         action = decisions.reason('auto', f"No magic import when price > -{FLOW_PROFIT_MARGIN}c and soc > 50%", priority=3)
     elif buy_price > CHEAP_BUY_PRICE:
@@ -96,8 +97,8 @@ if action == 'discharge' or action == 'charge':
 if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < FLOW_OFF_PEAK_END_HOUR:
     gain_from_hours = (i_hour - FLOW_SOLAR_SOAK_START_HOUR) * TARGET_SOC_GAIN_PER_HOUR
     gain_from_minutes_of_current_hour = i_minute * TARGET_SOC_GAIN_PER_MINUTE
-    target_soc = round(TARGET_START_HOUR_SOC + gain_from_hours + gain_from_minutes_of_current_hour, 2)
-    real_buy_price = rrp/1000 + SOLAR_SOAK_DNSP_FEE if i_hour < FLOW_SOLAR_SOAK_END_HOUR else OFF_PEAK_DNSP_FEE
+    target_soc = min(round(TARGET_START_HOUR_SOC + gain_from_hours + gain_from_minutes_of_current_hour, 2), IMPORT_SOC_LIMIT)
+    real_buy_price = rrp/10 + SOLAR_SOAK_DNSP_FEE if i_hour < FLOW_SOLAR_SOAK_END_HOUR else OFF_PEAK_DNSP_FEE
     FLOW_SOAK_START_TEXT = f"Flow N71 AEST solar soak starts {FLOW_SOLAR_SOAK_START_HOUR}am"
     if battery_soc < target_soc and real_buy_price <= MAX_BUY_PRICE:
         action = decisions.reason('import', f"{FLOW_SOAK_START_TEXT}, {target_soc=}, {real_buy_price=}", priority=4)
