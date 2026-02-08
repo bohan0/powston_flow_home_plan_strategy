@@ -70,7 +70,7 @@ TARGET_START_HOUR_SOC = 16
 TARGET_SOC_GAIN_PER_HOUR = 16
 TARGET_SOC_GAIN_PER_MINUTE = TARGET_SOC_GAIN_PER_HOUR/60
 CHEAP_BUY_PRICE = 5  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tariff
-CHEAP_BUY_TARGET_SOC_OFFSET = 5  # increase the target soc if buy price is low to avoid importing at higher prices later
+CHEAP_BUY_TARGET_SOC_OFFSET = 10  # increase the target soc if buy price is low to avoid importing at higher prices later
 FLOW_PROFIT_MARGIN = 15  # a guestimate of how much Flow makes c/kWh based on historical bills
 SOLAR_SOAK_DNSP_FEE = 4  # 2025-2026 FY Endeavour N71 solar soak tariff for 10am to 2pm
 OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm LOCAL time
@@ -98,7 +98,10 @@ if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < FLOW_OFF_PEAK_E
     gain_from_hours = (i_hour - FLOW_SOLAR_SOAK_START_HOUR) * TARGET_SOC_GAIN_PER_HOUR
     gain_from_minutes_of_current_hour = i_minute * TARGET_SOC_GAIN_PER_MINUTE
     target_soc = min(round(TARGET_START_HOUR_SOC + gain_from_hours + gain_from_minutes_of_current_hour, 2), IMPORT_SOC_LIMIT)
-    real_buy_price = rrp/10 + SOLAR_SOAK_DNSP_FEE if i_hour < FLOW_SOLAR_SOAK_END_HOUR else OFF_PEAK_DNSP_FEE
+    dnsp_fee = OFF_PEAK_DNSP_FEE
+    if i_hour < FLOW_SOLAR_SOAK_END_HOUR:
+        dnsp_fee = SOLAR_SOAK_DNSP_FEE
+    real_buy_price = (rrp/10) + dnsp_fee
     FLOW_SOAK_START_TEXT = f"Flow N71 AEST solar soak starts {FLOW_SOLAR_SOAK_START_HOUR}am"
     if battery_soc < target_soc and real_buy_price <= MAX_BUY_PRICE:
         action = decisions.reason('import', f"{FLOW_SOAK_START_TEXT}, {target_soc=}, {real_buy_price=}", priority=4)
