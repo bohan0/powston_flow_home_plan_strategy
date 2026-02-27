@@ -69,13 +69,24 @@ MAX_BUY_PRICE = 15
 TARGET_START_HOUR_SOC = 16
 TARGET_SOC_GAIN_PER_HOUR = 16
 TARGET_SOC_GAIN_PER_MINUTE = TARGET_SOC_GAIN_PER_HOUR/60
-CHEAP_BUY_PRICE = 5  # 7 is roughly 3c/kWh wholesale + N71 solar soak period tariff
+
+CHEAP_BUY_PRICE = 7  # 6 is roughly 2c/kWh wholesale + N71 solar soak period tariff
 CHEAP_BUY_TARGET_SOC_OFFSET = 10  # increase the target soc if buy price is low to avoid importing at higher prices later
+
+#
+# SAJ systems only: modbus control of grid import rate based price
+# it seems only intergers are accepted, hence the int() cast
+#
+SAJ_H_13903_SCALE = 0.1
+CHEAP_BUY_GRID_IMPORT_POWER_SCALED = int(100 / SAJ_H_13903_SCALE)
+NORMAL_BUY_GRID_IMPORT_POWER_SCALED = int(50 / SAJ_H_13903_SCALE)
+h_13903 = NORMAL_BUY_GRID_IMPORT_POWER_SCALED  # SAJ modbus address for setting grid import power level as % of max
+
 FLOW_PROFIT_MARGIN = 15  # a guestimate of how much Flow makes c/kWh based on historical bills
 SOLAR_SOAK_DNSP_FEE = 4  # 2025-2026 FY Endeavour N71 solar soak tariff for 10am to 2pm
 OFF_PEAK_DNSP_FEE = 12  # 2025-2026 FY Endeavour N71 off peak tariff 8pm-10am and 2pm-4pm LOCAL time
 FLOW_OFF_PEAK_END_HOUR = 16  # Funny Flow N71 AEST off peak end hour is actually 5pm but just use 4pm to be safe
-IMPORT_SOC_LIMIT = 95
+IMPORT_SOC_LIMIT = 90
 
 # If it's a 'post Flow PEA' negative price, let magic mode import, otherwise don't import if we have enough for house loads
 if action == 'import' and buy_price >= -FLOW_PROFIT_MARGIN:
@@ -86,7 +97,7 @@ if action == 'import' and buy_price >= -FLOW_PROFIT_MARGIN:
     elif buy_price > MAX_BUY_PRICE or battery_soc > BATTERY_SOC_AC:
         action = decisions.reason('auto', f"No magic import when price > {MAX_BUY_PRICE}c or enough soc to last until {FLOW_SOLAR_SOAK_START_HOUR}am", 
                                   priority=3, required_soc=BATTERY_SOC_AC)
-
+        
 if action == 'export':
     action = decisions.reason('auto', "Don't export outside of specific time periods as Flow sell=0c", priority=3)
     
@@ -101,12 +112,14 @@ if action != 'import' and FLOW_SOLAR_SOAK_START_HOUR <= i_hour < FLOW_OFF_PEAK_E
     dnsp_fee = OFF_PEAK_DNSP_FEE
     if i_hour < FLOW_SOLAR_SOAK_END_HOUR:
         dnsp_fee = SOLAR_SOAK_DNSP_FEE
-    real_buy_price = (rrp/10) + dnsp_fee
+    real_buy_price = round((rrp/10) + dnsp_fee, 2)
     FLOW_SOAK_START_TEXT = f"Flow N71 AEST solar soak starts {FLOW_SOLAR_SOAK_START_HOUR}am"
+    if real_buy_price <= CHEAP_BUY_PRICE:
+        h_13903 = CHEAP_BUY_GRID_IMPORT_POWER_SCALED  # SAJ modbus address for setting grid import power level as % of max
     if battery_soc < target_soc and real_buy_price <= MAX_BUY_PRICE:
-        action = decisions.reason('import', f"{FLOW_SOAK_START_TEXT}, {target_soc=}, {real_buy_price=}", priority=4)
+        action = decisions.reason('import', f"{FLOW_SOAK_START_TEXT}, {target_soc=}, {real_buy_price=}, {h_13903=}", priority=4)
     elif battery_soc < target_soc + CHEAP_BUY_TARGET_SOC_OFFSET and real_buy_price <= CHEAP_BUY_PRICE and i_hour < FLOW_SOLAR_SOAK_END_HOUR:
-        reason_description = f"{FLOW_SOAK_START_TEXT} with {CHEAP_BUY_TARGET_SOC_OFFSET}% higher target SoC due to low buy price, {target_soc=}"
+        reason_description = f"{FLOW_SOAK_START_TEXT} with {CHEAP_BUY_TARGET_SOC_OFFSET}% higher target SoC due to low buy price, {target_soc=}, {h_13903=}"
         action = decisions.reason('import', reason_description, priority=4, target_soc=target_soc, 
                                   low_price_target_soc_offset=CHEAP_BUY_TARGET_SOC_OFFSET, real_buy_price=real_buy_price)
 
